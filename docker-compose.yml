@@ -1,0 +1,24 @@
+version: "3.8"
+services:
+  hub-server:
+    build: ./apps/hub-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/hub-server:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  audio-worker:
+    build: ./scripts/audio-worker
+    volumes:
+      - ./scripts/audio-worker:/worker
+    restart: unless-stopped
+
+  image-worker:
+    build: ./scripts/image-worker
+    volumes:
+      - ./scripts/image-worker:/worker
+    restart: unless-stopped
+# vision-client, llm-client, whisper-client는 라이브러리로만 사용 (별도 서비스 X)

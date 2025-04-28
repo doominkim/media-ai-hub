@@ -1,0 +1,1 @@
+# whisper_client: 오디오 → 텍스트 변환용 
