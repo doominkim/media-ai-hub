@@ -10,3 +10,5 @@ dist/
 *.egg-info/
 .DS_Store
 docker-compose.override.yml 
+*.aac
+*.jpg
