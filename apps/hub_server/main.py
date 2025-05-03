@@ -1,5 +1,5 @@
 # pip install asyncpg databases 필요
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Query
 from apps.hub_server.routers import health
 from libs.whisper_client import whisper as whisper_client
 from libs.vision_client import vision as vision_client
@@ -37,6 +37,13 @@ async def transcribe_audio(file: UploadFile = File(...)):
         text = whisper_client.transcribe(temp_path)
     finally:
         os.remove(temp_path)
+    return {"text": text}
+
+@app.post("/whisper/transcribe-minio")
+async def transcribe_audio_minio(
+    key: str = Query(..., description="MinIO 버킷 내 오디오 파일 경로")
+):
+    text = whisper_client.transcribe_from_minio(key)
     return {"text": text}
 
 @app.post("/vision/describe")
