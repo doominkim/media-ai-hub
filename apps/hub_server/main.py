@@ -1,9 +1,11 @@
 # pip install asyncpg databases 필요
-from fastapi import FastAPI, UploadFile, File, Query
-from apps.hub_server.routers import health
+from fastapi import FastAPI, UploadFile, File, Query, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Dict, Any
 from libs.whisper_client import whisper as whisper_client
 from libs.vision_client import vision as vision_client
-from apps.hub_server import queue
+from apps.hub_server.nest_client import nest_client
 import shutil
 import os
 
@@ -13,49 +15,69 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# CORS 설정
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 라우터 등록
-app.include_router(health.router)
 
-@app.post("/whisper/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
-    temp_path = f"/tmp/{file.filename}"
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+@app.post("/process-audio")
+async def process_audio():
+    """오디오 처리 작업 실행"""
     try:
-        text = whisper_client.transcribe(temp_path)
-    finally:
-        os.remove(temp_path)
-    return {"text": text}
+        # Nest 서버에서 다음 작업 가져오기
+        job = nest_client.get_next_job("audio-processing")
+        print(job)
 
-@app.post("/whisper/transcribe-minio")
-async def transcribe_audio_minio(
-    key: str = Query(..., description="MinIO 버킷 내 오디오 파일 경로")
-):
-    text = whisper_client.transcribe_from_minio(key)
-    return {"text": text}
+        # 작업 데이터 추출
+        job_data = job["data"]
+        file_path = job_data["filePath"]
+        channel_id = job_data["channelId"]
+        live_id = job_data["liveId"]
+        start_time = job_data["startTime"]
+        end_time = job_data["endTime"]
 
-@app.post("/vision/describe")
-async def describe_image(file: UploadFile = File(...)):
-    temp_path = f"/tmp/{file.filename}"
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    try:
-        label = vision_client.describe_image(temp_path)
-    finally:
-        os.remove(temp_path)
-    return {"label": label}
+        try:
+            # Whisper로 오디오 변환
+            text = whisper_client.transcribe_from_minio(file_path)
+            
+            # 작업 완료 처리
+            result = {
+                "status": "success",
+                "text": text,
+                "metadata": {
+                    "channelId": channel_id,
+                    "liveId": live_id,
+                    "startTime": start_time,
+                    "endTime": end_time
+                }
+            }
+            nest_client.complete_job("audio-processing", job["id"], result)
+            return result
 
-@app.post("/vision/describe-minio")
-async def describe_image_minio(
-    key: str = Query(..., description="MinIO 버킷 내 이미지 파일 경로")
-):
-    job_id = queue.enqueue_vision(key)
-    return {"job_id": job_id}
+        except Exception as e:
+            # 작업 실패 처리
+            nest_client.fail_job("audio-processing", job["id"], str(e))
+            raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/jobs/{queue_name}/{job_id}")
-async def get_job_status(queue_name: str, job_id: str):
-    return queue.get_job_status(queue_name, job_id)
+    except HTTPException as e:
+        if e.status_code == 404:
+            raise HTTPException(status_code=404, detail="No jobs available")
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @app.get("/")
 async def root():
     return {"message": "Welcome to Media AI Hub"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

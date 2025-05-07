@@ -8,7 +8,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 # Redis 연결 설정
-redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis_url = os.getenv("REDIS_URL", "redis://121.167.129.36:6379")
 redis_conn = Redis.from_url(redis_url)
 
 # 작업자 설정
