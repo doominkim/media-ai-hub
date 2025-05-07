@@ -44,5 +44,17 @@ class NestClient:
         except requests.exceptions.RequestException as e:
             raise HTTPException(status_code=500, detail=f"작업 실패 처리 중 에러 발생: {str(e)}")
 
+    def add_job(self, queue_key: str, job_data: Dict[str, Any]) -> Dict[str, Any]:
+        """큐에 작업 추가"""
+        try:
+            response = requests.post(
+                f"{self.base_url}/queue/{queue_key}",
+                json=job_data
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            raise HTTPException(status_code=500, detail=f"작업 추가 중 에러 발생: {str(e)}")
+
 # 싱글톤 인스턴스 생성
 nest_client = NestClient() 

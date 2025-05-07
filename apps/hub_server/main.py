@@ -58,6 +58,18 @@ async def process_audio():
                 }
             }
             nest_client.complete_job("audio-processing", job["id"], result)
+
+            # whisper-processing 큐에 결과 추가
+            whisper_job_data = {
+                "filePath": file_path,
+                "channelId": channel_id,
+                "liveId": live_id,
+                "startTime": start_time,
+                "endTime": end_time,
+                "text": text
+            }
+            nest_client.add_job("whisper-processing", whisper_job_data)
+
             return result
 
         except Exception as e:
