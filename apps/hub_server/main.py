@@ -3,7 +3,7 @@ from fastapi import FastAPI, UploadFile, File, Query
 from apps.hub_server.routers import health
 from libs.whisper_client import whisper as whisper_client
 from libs.vision_client import vision as vision_client
-from apps.hub_server import db
+from apps.hub_server import queue
 import shutil
 import os
 
@@ -12,18 +12,6 @@ app = FastAPI(
     description="멀티미디어 데이터 AI 분석 허브 서버",
     version="0.1.0",
 )
-
-@app.on_event("startup")
-async def startup():
-    try:
-        await db.connect_db()
-        print("[DB] 연결 성공!")
-    except Exception as e:
-        print(f"[DB] 연결 실패: {e}")
-
-@app.on_event("shutdown")
-async def shutdown():
-    await db.disconnect_db()
 
 # 라우터 등록
 app.include_router(health.router)
@@ -43,8 +31,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
 async def transcribe_audio_minio(
     key: str = Query(..., description="MinIO 버킷 내 오디오 파일 경로")
 ):
-    text = whisper_client.transcribe_from_minio(key)
-    return {"text": text}
+    job_id = queue.enqueue_transcribe(key)
+    return {"job_id": job_id}
 
 @app.post("/vision/describe")
 async def describe_image(file: UploadFile = File(...)):
@@ -57,13 +45,16 @@ async def describe_image(file: UploadFile = File(...)):
         os.remove(temp_path)
     return {"label": label}
 
-@app.get("/pg/health")
-async def pg_health():
-    try:
-        row = await db.database.fetch_one("SELECT 1 AS ok")
-        return {"pg_status": row["ok"]}
-    except Exception as e:
-        return {"pg_status": "error", "detail": str(e)}
+@app.post("/vision/describe-minio")
+async def describe_image_minio(
+    key: str = Query(..., description="MinIO 버킷 내 이미지 파일 경로")
+):
+    job_id = queue.enqueue_vision(key)
+    return {"job_id": job_id}
+
+@app.get("/jobs/{queue_name}/{job_id}")
+async def get_job_status(queue_name: str, job_id: str):
+    return queue.get_job_status(queue_name, job_id)
 
 @app.get("/")
 async def root():

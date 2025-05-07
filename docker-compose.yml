@@ -12,7 +12,26 @@ services:
     environment:
       - PYTHONPATH=/app
       - ENVIRONMENT=development
+      - REDIS_URL=redis://121.167.129.36:6379/0
     command: uvicorn apps.hub_server.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/apps
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  audio_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app:delegated
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://121.167.129.36:6379/0
+    command: python scripts/audio_worker.py
     deploy:
       resources:
         reservations:
