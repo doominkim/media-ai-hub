@@ -12,7 +12,7 @@ def transcribe(audio_path: str) -> str:
 def transcribe_from_minio(
     key,
     bucket="stream-project-data",
-    endpoint_url="http://localhost:9000",
+    endpoint_url="http://121.167.129.36:9000",
     access_key="dominic",
     secret_key="gumdong1!530"
 ):

@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   hub_server:
     build:
@@ -13,7 +11,7 @@ services:
       - PYTHONPATH=/app
       - ENVIRONMENT=development
       - REDIS_URL=redis://121.167.129.36:6379/0
-    command: uvicorn apps.hub_server.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/apps
+    command: uvicorn apps.hub_server.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/apps --reload-dir /app/libs
     deploy:
       resources:
         reservations:

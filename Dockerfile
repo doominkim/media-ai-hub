@@ -1,4 +1,5 @@
-FROM python:3.10-slim
+# PyTorch가 미리 설치된 이미지 사용
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 
 # 작업 디렉토리 설정
 WORKDIR /app

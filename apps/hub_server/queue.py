@@ -27,6 +27,8 @@ def process_audio_job(job_data: Dict[str, Any]) -> Dict[str, Any]:
         # Whisper로 오디오 변환
         text = whisper_client.transcribe_from_minio(file_path)
         
+
+        print(text)
         return {
             "status": "success",
             "text": text,

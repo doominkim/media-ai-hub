@@ -31,8 +31,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
 async def transcribe_audio_minio(
     key: str = Query(..., description="MinIO 버킷 내 오디오 파일 경로")
 ):
-    job_id = queue.enqueue_transcribe(key)
-    return {"job_id": job_id}
+    text = whisper_client.transcribe_from_minio(key)
+    return {"text": text}
 
 @app.post("/vision/describe")
 async def describe_image(file: UploadFile = File(...)):
