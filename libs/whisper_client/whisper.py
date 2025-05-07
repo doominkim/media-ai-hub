@@ -4,8 +4,11 @@ import whisper
 from io import BytesIO
 import tempfile
 
+# 전역 변수로 모델을 한 번만 로드
+WHISPER_MODEL = "medium"  # 또는 "small", "medium", "large" 중 선택
+model = whisper.load_model(WHISPER_MODEL)
+
 def transcribe(audio_path: str) -> str:
-    model = whisper.load_model("base")
     result = model.transcribe(audio_path)
     return result["text"]
 
@@ -27,6 +30,4 @@ def transcribe_from_minio(
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=True) as tmp:
         tmp.write(audio_bytes)
         tmp.flush()
-        model = whisper.load_model("base")
-        result = model.transcribe(tmp.name)
-    return result["text"] 
+        return transcribe(tmp.name)
