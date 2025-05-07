@@ -6,21 +6,17 @@ import tempfile
 import torch
 import torchaudio
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Tuple
+from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
 
 # 전역 변수로 모델을 한 번만 로드
 WHISPER_MODEL = "medium"  # 또는 "small", "medium", "large" 중 선택
-model = whisper.load_model(WHISPER_MODEL)
+whisper_model = whisper.load_model(WHISPER_MODEL)
 
 # Silero VAD 모델 로드
-torch.set_num_threads(4)
-vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                                model='silero_vad',
-                                force_reload=True)
-(get_speech_timestamps,
- save_audio,
- read_audio,
- VADIterator,
- collect_chunks) = utils
+torch.set_num_threads(1)  # 공식 문서 권장사항
+vad_model = load_silero_vad()
 
 def extract_voice_segments(audio_path: str, min_duration: float = 0.5) -> list:
     """
@@ -33,22 +29,29 @@ def extract_voice_segments(audio_path: str, min_duration: float = 0.5) -> list:
     Returns:
         list: [(시작 시간, 종료 시간), ...] 형식의 음성 구간 리스트
     """
-    # 오디오 로드
+    # 오디오 로드 (16kHz로 리샘플링)
     wav = read_audio(audio_path, sampling_rate=16000)
     
     # 음성 구간 감지
     speech_timestamps = get_speech_timestamps(wav, vad_model, 
-                                            threshold=0.5,
+                                            threshold=0.8,  # 더 엄격한 임계값 (게임 사운드 필터링)
                                             sampling_rate=16000,
-                                            min_speech_duration_ms=int(min_duration * 1000),
-                                            min_silence_duration_ms=500)
+                                            min_speech_duration_ms=500,  # 최소 0.5초 이상의 음성만 감지
+                                            min_silence_duration_ms=400,  # 무음 구간 최소 길이 증가
+                                            window_size_samples=2048,  # 더 큰 윈도우로 안정성 확보
+                                            speech_pad_ms=50,  # 패딩 증가로 음성 손실 방지
+                                            return_seconds=True)  # 초 단위로 반환
     
-    # 구간을 (시작 시간, 종료 시간) 형식으로 변환
+    # 구간을 (시작 시간, 종료 시간) 형식으로 변환하고 최소 길이 보장
     voice_segments = []
     for ts in speech_timestamps:
-        start_time = ts['start'] / 16000  # 샘플링 레이트로 나누어 초 단위로 변환
-        end_time = ts['end'] / 16000
-        voice_segments.append((start_time, end_time))
+        start, end = ts['start'], ts['end']
+        if end - start < min_duration:
+            # 세그먼트가 너무 짧은 경우, 앞뒤로 확장
+            center = (start + end) / 2
+            start = max(0, center - min_duration/2)
+            end = center + min_duration/2
+        voice_segments.append((start, end))
     
     return voice_segments
 
@@ -67,6 +70,14 @@ def extract_audio_segment(audio_path: str, start_time: float, end_time: float) -
     # 오디오 로드
     waveform, sample_rate = torchaudio.load(audio_path)
     
+    # 최소 길이 확인 (0.5초)
+    min_duration = 0.5
+    if end_time - start_time < min_duration:
+        # 세그먼트가 너무 짧은 경우, 앞뒤로 확장
+        center = (start_time + end_time) / 2
+        start_time = max(0, center - min_duration/2)
+        end_time = center + min_duration/2
+    
     # 구간 추출
     start_sample = int(start_time * sample_rate)
     end_sample = int(end_time * sample_rate)
@@ -78,15 +89,58 @@ def extract_audio_segment(audio_path: str, start_time: float, end_time: float) -
         return tmp.name
 
 def transcribe(audio_path: str) -> str:
-    result = model.transcribe(audio_path)
+    result = whisper_model.transcribe(audio_path,   
+                                      language="ko"  # 한국어로 번역
+                                    )
     return result["text"]
+
+def process_segment(args: Tuple[str, float, float]) -> str:
+    """
+    단일 오디오 구간을 처리합니다.
+    
+    Args:
+        args: (오디오 파일 경로, 시작 시간, 종료 시간) 튜플
+        
+    Returns:
+        str: 추출된 텍스트
+        
+    Raises:
+        ValueError: 텍스트 추출 실패 시
+    """
+    audio_path, start_time, end_time = args
+    
+    # 최소 길이 확인 (0.5초)
+    min_duration = 0.5
+    if end_time - start_time < min_duration:
+        # 세그먼트가 너무 짧은 경우, 앞뒤로 확장
+        center = (start_time + end_time) / 2
+        start_time = max(0, center - min_duration/2)
+        end_time = center + min_duration/2
+    
+    segment_path = extract_audio_segment(audio_path, start_time, end_time)
+    try:
+        # Whisper 모델에 전달하기 전에 오디오 길이 확인
+        waveform, sample_rate = torchaudio.load(segment_path)
+        duration = waveform.shape[1] / sample_rate
+        
+        if duration < min_duration:
+            raise ValueError(f"Audio segment too short: {duration:.2f}s")
+            
+        text = transcribe(segment_path)
+        text = text.strip()
+        if not text:  # 빈 문자열인 경우
+            raise ValueError("No text extracted from audio segment")
+        return text
+    finally:
+        os.unlink(segment_path)
 
 def transcribe_from_minio(
     key,
     bucket="stream-project-data",
     endpoint_url="http://121.167.129.36:9000",
     access_key="dominic",
-    secret_key="gumdong1!530"
+    secret_key="gumdong1!530",
+    max_workers: int = 4
 ):
     s3 = boto3.client(
         's3',
@@ -101,25 +155,41 @@ def transcribe_from_minio(
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
         tmp.write(audio_bytes)
         tmp.flush()
+        tmp_path = tmp.name
         
-        # 음성 구간 추출
-        voice_segments = extract_voice_segments(tmp.name)
-        
-        # 각 구간별로 텍스트 추출
-        texts = []
-        for start_time, end_time in voice_segments:
-            # 구간 추출
-            segment_path = extract_audio_segment(tmp.name, start_time, end_time)
-            try:
-                # 구간 텍스트 추출
-                text = transcribe(segment_path)
-                if text.strip():  # 빈 텍스트가 아닌 경우만 추가
-                    texts.append(text)
-            finally:
-                # 임시 파일 삭제
-                os.unlink(segment_path)
-        
-        # 원본 임시 파일 삭제
-        os.unlink(tmp.name)
-        
-        return " ".join(texts)
+        try:
+            # 음성 구간 추출
+            voice_segments = extract_voice_segments(tmp_path)
+            
+            if not voice_segments:  # 음성 구간이 없는 경우
+                raise ValueError("No voice segments detected in audio")
+            
+            # 병렬 처리로 각 구간 처리
+            texts = []
+            errors = []
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # 각 구간에 대해 처리 작업 제출
+                future_to_segment = {
+                    executor.submit(process_segment, (tmp_path, start, end)): (start, end)
+                    for start, end in voice_segments
+                }
+                
+                # 결과 수집
+                for future in as_completed(future_to_segment):
+                    start, end = future_to_segment[future]
+                    try:
+                        text = future.result()
+                        texts.append(text)
+                    except Exception as e:
+                        error_msg = f"Error processing segment {start:.2f}-{end:.2f}: {str(e)}"
+                        errors.append(error_msg)
+                        print(error_msg)
+            
+            if not texts:  # 모든 구간에서 텍스트 추출 실패
+                raise ValueError("Failed to extract text from any audio segment")
+            
+            return " ".join(texts)
+            
+        finally:
+            # 원본 임시 파일 삭제
+            os.unlink(tmp_path)

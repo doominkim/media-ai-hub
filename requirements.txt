@@ -50,3 +50,4 @@ typing_extensions==4.13.2
 urllib3==2.4.0
 boto3
 torchaudio==2.1.0
+silero-vad==5.1.2
