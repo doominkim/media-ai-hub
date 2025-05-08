@@ -34,9 +34,9 @@ def extract_voice_segments(audio_path: str, min_duration: float = 0.5) -> list:
     
     # 음성 구간 감지
     speech_timestamps = get_speech_timestamps(wav, vad_model, 
-                                            threshold=0.8,  # 더 엄격한 임계값 (게임 사운드 필터링)
+                                            threshold=0.6,  # 더 엄격한 임계값 (게임 사운드 필터링)
                                             sampling_rate=16000,
-                                            min_speech_duration_ms=500,  # 최소 0.5초 이상의 음성만 감지
+                                            min_speech_duration_ms=300,  # 최소 0.5초 이상의 음성만 감지
                                             min_silence_duration_ms=400,  # 무음 구간 최소 길이 증가
                                             window_size_samples=2048,  # 더 큰 윈도우로 안정성 확보
                                             speech_pad_ms=50,  # 패딩 증가로 음성 손실 방지
