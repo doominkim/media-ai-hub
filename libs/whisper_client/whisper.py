@@ -18,7 +18,7 @@ whisper_model = whisper.load_model(WHISPER_MODEL)
 torch.set_num_threads(1)  # 공식 문서 권장사항
 vad_model = load_silero_vad()
 
-def extract_voice_segments(audio_path: str, min_duration: float = 0.5) -> list:
+def extract_voice_segments(audio_path: str, min_duration: float = 1.0) -> list:
     """
     오디오 파일에서 음성 구간을 추출합니다.
     
@@ -32,28 +32,37 @@ def extract_voice_segments(audio_path: str, min_duration: float = 0.5) -> list:
     # 오디오 로드 (16kHz로 리샘플링)
     wav = read_audio(audio_path, sampling_rate=16000)
     
+    # 오디오 정규화
+    wav = wav / (torch.max(torch.abs(wav)) + 1e-8)
+    
     # 음성 구간 감지
     speech_timestamps = get_speech_timestamps(wav, vad_model, 
-                                            threshold=0.6,  # 더 엄격한 임계값 (게임 사운드 필터링)
+                                            threshold=0.6,
                                             sampling_rate=16000,
-                                            min_speech_duration_ms=300,  # 최소 0.5초 이상의 음성만 감지
-                                            min_silence_duration_ms=400,  # 무음 구간 최소 길이 증가
-                                            window_size_samples=2048,  # 더 큰 윈도우로 안정성 확보
-                                            speech_pad_ms=50,  # 패딩 증가로 음성 손실 방지
-                                            return_seconds=True)  # 초 단위로 반환
+                                            min_speech_duration_ms=int(min_duration * 1000),  # 최소 1초
+                                            min_silence_duration_ms=400,
+                                            window_size_samples=1024,
+                                            speech_pad_ms=20,  # 패딩 증가
+                                            return_seconds=True)
     
-    # 구간을 (시작 시간, 종료 시간) 형식으로 변환하고 최소 길이 보장
-    voice_segments = []
-    for ts in speech_timestamps:
-        start, end = ts['start'], ts['end']
-        if end - start < min_duration:
-            # 세그먼트가 너무 짧은 경우, 앞뒤로 확장
-            center = (start + end) / 2
-            start = max(0, center - min_duration/2)
-            end = center + min_duration/2
-        voice_segments.append((start, end))
+    # 구간 병합 로직
+    merged_segments = []
+    if speech_timestamps:
+        current_start, current_end = speech_timestamps[0]['start'], speech_timestamps[0]['end']
+        for ts in speech_timestamps[1:]:
+            start, end = ts['start'], ts['end']
+            if start - current_end < 0.5:  # 500ms 이내의 간격이면 병합
+                current_end = end
+            else:
+                if current_end - current_start >= min_duration:  # 최소 길이 확인
+                    merged_segments.append((current_start, current_end))
+                current_start, current_end = start, end
+        
+        # 마지막 구간 처리
+        if current_end - current_start >= min_duration:
+            merged_segments.append((current_start, current_end))
     
-    return voice_segments
+    return merged_segments
 
 def extract_audio_segment(audio_path: str, start_time: float, end_time: float) -> str:
     """
@@ -90,8 +99,12 @@ def extract_audio_segment(audio_path: str, start_time: float, end_time: float) -
 
 def transcribe(audio_path: str) -> str:
     result = whisper_model.transcribe(audio_path,   
-                                      language="ko"  # 한국어로 번역
-                                    )
+        language="ko",
+        task="transcribe",
+        best_of=2,
+        beam_size=2,
+        condition_on_previous_text=False
+        )
     return result["text"]
 
 def process_segment(args: Tuple[str, float, float]) -> str:
@@ -109,8 +122,8 @@ def process_segment(args: Tuple[str, float, float]) -> str:
     """
     audio_path, start_time, end_time = args
     
-    # 최소 길이 확인 (0.5초)
-    min_duration = 0.5
+    # 최소 길이 확인 (1초)
+    min_duration = 1.0  # 0.5초에서 1초로 증가
     if end_time - start_time < min_duration:
         # 세그먼트가 너무 짧은 경우, 앞뒤로 확장
         center = (start_time + end_time) / 2
@@ -119,20 +132,36 @@ def process_segment(args: Tuple[str, float, float]) -> str:
     
     segment_path = extract_audio_segment(audio_path, start_time, end_time)
     try:
-        # Whisper 모델에 전달하기 전에 오디오 길이 확인
+        # 오디오 파일 검증
         waveform, sample_rate = torchaudio.load(segment_path)
-        duration = waveform.shape[1] / sample_rate
         
+        # 오디오 길이 확인
+        duration = waveform.shape[1] / sample_rate
         if duration < min_duration:
             raise ValueError(f"Audio segment too short: {duration:.2f}s")
             
+        # 오디오 형식 검증
+        if waveform.shape[0] == 0 or waveform.shape[1] == 0:
+            raise ValueError("Invalid audio format: empty waveform")
+            
+        # 스테레오를 모노로 변환
+        if waveform.shape[0] > 1:
+            waveform = torch.mean(waveform, dim=0, keepdim=True)
+            
+        # 볼륨 정규화
+        waveform = waveform / (torch.max(torch.abs(waveform)) + 1e-8)
+        
+        # 정규화된 오디오 저장
+        torchaudio.save(segment_path, waveform, sample_rate)
+            
         text = transcribe(segment_path)
         text = text.strip()
-        if not text:  # 빈 문자열인 경우
+        if not text:
             raise ValueError("No text extracted from audio segment")
         return text
     finally:
-        os.unlink(segment_path)
+        if os.path.exists(segment_path):
+            os.unlink(segment_path)
 
 def transcribe_from_minio(
     key,
