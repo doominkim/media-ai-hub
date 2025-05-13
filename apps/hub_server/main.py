@@ -6,7 +6,7 @@ from typing import Dict, Any
 from libs.whisper_client import whisper as whisper_client
 from libs.vision_client import vision as vision_client
 from apps.hub_server.nest_client import nest_client
-import shutil
+import shutil      
 import os
 import asyncio
 
@@ -115,6 +115,14 @@ async def startup_event():
 @app.get("/")
 async def root():
     return {"message": "Welcome to Media AI Hub"}
+
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "version": app.version,
+        "service": "Media AI Hub"
+    }
 
 if __name__ == "__main__":
     import uvicorn
