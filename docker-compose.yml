@@ -1,5 +1,5 @@
 services:
-  hub_server:
+  hub_server_0:
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,7 +10,71 @@ services:
     environment:
       - PYTHONPATH=/app
       - ENVIRONMENT=development
+      - WORKER_ID=0
     command: uvicorn apps.hub_server.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/apps --reload-dir /app/libs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  hub_server_1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    volumes:
+      - .:/app:delegated
+    environment:
+      - PYTHONPATH=/app
+      - ENVIRONMENT=development
+      - WORKER_ID=1
+    command: uvicorn apps.hub_server.main:app --host 0.0.0.0 --port 8001 --reload --reload-dir /app/apps --reload-dir /app/libs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  hub_server_2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    volumes:
+      - .:/app:delegated
+    environment:
+      - PYTHONPATH=/app
+      - ENVIRONMENT=development
+      - WORKER_ID=2
+    command: uvicorn apps.hub_server.main:app --host 0.0.0.0 --port 8002 --reload --reload-dir /app/apps --reload-dir /app/libs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  hub_server_3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8003"
+    volumes:
+      - .:/app:delegated
+    environment:
+      - PYTHONPATH=/app
+      - ENVIRONMENT=development
+      - WORKER_ID=3
+    command: uvicorn apps.hub_server.main:app --host 0.0.0.0 --port 8003 --reload --reload-dir /app/apps --reload-dir /app/libs
     deploy:
       resources:
         reservations:

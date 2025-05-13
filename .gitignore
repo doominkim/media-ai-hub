@@ -12,3 +12,10 @@ dist/
 docker-compose.override.yml 
 *.aac
 *.jpg
+*.png
+*.mp4
+*.wav
+*.m4a
+*.mp3
+*.ogg
+logs
