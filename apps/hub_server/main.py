@@ -25,6 +25,13 @@ class KSTFormatter(logging.Formatter):
             return dt.strftime(datefmt)
         return dt.strftime("%Y-%m-%d %H:%M:%S")
 
+def get_log_directory():
+    """오늘 날짜의 로그 디렉토리 경로를 반환"""
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    log_dir = os.path.join("logs", today)
+    os.makedirs(log_dir, exist_ok=True)
+    return log_dir
+
 # 로깅 설정
 def setup_logger(worker_id):
     logger = logging.getLogger(f"worker_{worker_id}")
@@ -37,8 +44,9 @@ def setup_logger(worker_id):
     console_handler.setFormatter(formatter)
     
     # 파일 출력 핸들러
+    log_dir = get_log_directory()
     file_handler = RotatingFileHandler(
-        f'logs/worker_{worker_id}.log',
+        os.path.join(log_dir, f'worker_{worker_id}.log'),
         maxBytes=10*1024*1024,  # 10MB
         backupCount=5
     )
