@@ -191,7 +191,13 @@ async def process_audio_job():
             logger.error(f"HTTP 에러 발생: {str(e)}")
             await asyncio.sleep(5)
         except Exception as e:
-            logger.error(f"예상치 못한 에러 발생: {str(e)}")
+            error_msg = str(e)
+            if "No jobs available" in error_msg:
+                # 작업이 없는 경우는 예상된 상황이므로 INFO 레벨로 로깅
+                logger.info("처리할 작업이 없습니다. 5초 후 재시도...")
+                await asyncio.sleep(5)
+                continue
+            logger.error(f"예상치 못한 에러 발생: {error_msg}")
             await asyncio.sleep(5)
 
 @app.on_event("startup")

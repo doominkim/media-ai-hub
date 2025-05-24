@@ -11,7 +11,7 @@ from typing import List, Tuple
 from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
 
 # 전역 변수로 모델을 한 번만 로드
-WHISPER_MODEL = "base"  # 또는 "small", "medium", "large" 중 선택
+WHISPER_MODEL = "small"  # 또는 "small", "medium", "large" 중 선택
 whisper_model = whisper.load_model(WHISPER_MODEL)
 
 # Silero VAD 모델 로드
