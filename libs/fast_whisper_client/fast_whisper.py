@@ -11,7 +11,7 @@ from typing import List, Tuple
 from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
 
 # 전역 변수로 모델을 한 번만 로드
-WHISPER_MODEL = "base" # 또는 "small", "medium", "large" 중 선택
+WHISPER_MODEL = "small" # 또는 "small", "medium", "large" 중 선택
 
 # GPU 사용 가능 여부 확인 및 안전한 초기화
 device = "cpu"  # 기본값을 CPU로 설정
@@ -95,10 +95,6 @@ def extract_voice_segments(audio_path: str, min_duration: float = 0.5) -> list:
         # 오디오 정규화
         wav = wav / (torch.max(torch.abs(wav)) + 1e-8)
         
-        # 오디오 길이 확인
-        audio_duration = len(wav) / 16000
-        print(f"🎵 오디오 분석: 길이={audio_duration:.2f}초")
-        
         # 음성 구간 감지 (더 관대한 설정)
         speech_timestamps = get_speech_timestamps(wav, vad_model, 
                                                 threshold=0.4,  # 0.6에서 0.4로 낮춤
@@ -108,8 +104,6 @@ def extract_voice_segments(audio_path: str, min_duration: float = 0.5) -> list:
                                                 window_size_samples=1024,
                                                 speech_pad_ms=50,  # 20에서 50으로 증가 (더 많은 패딩)
                                                 return_seconds=True)
-        
-        print(f"🔍 VAD 결과: {len(speech_timestamps)}개 음성 구간 감지")
         
         # 구간 병합 로직
         merged_segments = []
@@ -127,10 +121,6 @@ def extract_voice_segments(audio_path: str, min_duration: float = 0.5) -> list:
             # 마지막 구간 처리
             if current_end - current_start >= min_duration:
                 merged_segments.append((current_start, current_end))
-                
-        print(f"📊 병합 후: {len(merged_segments)}개 최종 음성 구간")
-        for i, (start, end) in enumerate(merged_segments):
-            print(f"   구간 {i+1}: {start:.2f}초 ~ {end:.2f}초 ({end-start:.2f}초)")
         
         return merged_segments
         
@@ -323,7 +313,6 @@ def transcribe_from_minio(
             voice_segments = extract_voice_segments(tmp_path)
             
             if not voice_segments:  # 음성 구간이 없는 경우 바로 실패 처리
-                print("❌ VAD 결과: 음성 구간이 감지되지 않았습니다")
                 raise ValueError("No voice segments detected in audio - VAD analysis complete")
             
             # 병렬 처리로 각 구간 처리
@@ -343,12 +332,10 @@ def transcribe_from_minio(
                         text = future.result()
                         texts.append(text)
                     except Exception as e:
-                        error_msg = f"Error processing segment {start:.2f}-{end:.2f}: {str(e)}"
-                        errors.append(error_msg)
-                        print(error_msg)
+                        # 개별 구간 실패는 로그 없이 조용히 처리
+                        errors.append(f"Segment {start:.1f}-{end:.1f}s failed")
             
             if not texts:  # 모든 구간에서 텍스트 추출 실패
-                print("❌ 모든 음성 구간에서 텍스트 추출 실패")
                 raise ValueError("Failed to extract text from any audio segment")
             
             return " ".join(texts)

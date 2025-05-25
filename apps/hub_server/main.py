@@ -103,18 +103,131 @@ class JobStatus(BaseModel):
     progress: float = 0.0
     error: str = None
 
+class JobLog:
+    """작업별 로그를 수집하고 관리하는 클래스"""
+    def __init__(self, job_id: str, job_data: dict):
+        self.job_id = job_id
+        self.job_data = job_data
+        self.start_time = datetime.now(KST)
+        self.logs = []
+        self.timers = {}
+        self.result = None
+        self.error = None
+        
+    def add_log(self, event: str, data: dict = None):
+        """로그 이벤트 추가"""
+        log_entry = {
+            "timestamp": datetime.now(KST).isoformat(),
+            "event": event,
+            "data": data or {}
+        }
+        self.logs.append(log_entry)
+    
+    def start_timer(self, name: str):
+        """타이머 시작"""
+        self.timers[name] = {
+            "start": datetime.now(KST),
+            "duration": None
+        }
+        
+    def end_timer(self, name: str):
+        """타이머 종료"""
+        if name in self.timers:
+            start_time = self.timers[name]["start"]
+            duration = (datetime.now(KST) - start_time).total_seconds()
+            self.timers[name]["duration"] = round(duration, 2)
+            return duration
+        return 0
+    
+    def set_result(self, result: dict):
+        """작업 결과 설정"""
+        self.result = result
+        
+    def set_error(self, error: str):
+        """에러 설정"""
+        self.error = error
+        
+    def get_summary(self) -> dict:
+        """작업 요약 정보 반환"""
+        end_time = datetime.now(KST)
+        total_duration = (end_time - self.start_time).total_seconds()
+        
+        # 타이머 정보를 깔끔하게 정리
+        clean_timers = {}
+        for name, timer in self.timers.items():
+            clean_timers[name] = timer.get("duration", 0)
+        
+        summary = {
+            "job_id": self.job_id,
+            "status": "success" if self.result else "failed",
+            "duration": round(total_duration, 2),
+            "file": self.job_data.get("filePath", "").split('/')[-1],  # 파일명만
+            "channel": self.job_data.get("channelId", ""),
+            "timers": clean_timers,
+            "error": self.error[:100] + "..." if self.error and len(self.error) > 100 else self.error
+        }
+        
+        return summary
+    
+    def print_final_log(self):
+        """최종 로그 출력"""
+        summary = self.get_summary()
+        
+        # 성공/실패에 따른 이모지와 색상
+        status_emoji = "✅" if summary["status"] == "success" else "❌"
+        
+        # 한 줄로 요약된 로그 출력
+        transcription_time = summary['timers'].get('transcription', 0)
+        logger.info(f"{status_emoji} 작업 완료 | "
+                   f"ID: {summary['job_id']} | "
+                   f"파일: {summary['file']} | "
+                   f"채널: {summary['channel']} | "
+                   f"총: {summary['duration']}초 | "
+                   f"변환: {transcription_time}초 | "
+                   f"상태: {summary['status']}")
+        
+        # 성공한 경우 변환된 텍스트 출력
+        if summary["status"] == "success" and self.result and "text" in self.result:
+            text = self.result["text"]
+            logger.info(f"변환된 텍스트: {text}")
+        
+        # 상세 JSON 로그 (실패하거나 10초 이상 걸린 경우만, 단 VAD analysis complete는 제외)
+        is_vad_error = self.error and "VAD analysis complete" in self.error
+        if (summary["status"] == "failed" or summary["duration"] > 10) and not is_vad_error:
+            import json
+            clean_json = json.dumps(summary, ensure_ascii=False, indent=2)
+            logger.info(f"📋 상세 정보:\n{clean_json}")
+
+# 작업별 로그 저장소
+job_logs = {}
+
 async def process_audio_job():
     """오디오 처리 작업 실행"""
     while True:
         try:
             # Nest 서버에서 다음 작업 가져오기
             job = nest_client.get_next_job("audio-processing")
-            logger.info(f"작업 정보: {job}")
 
-            # 작업 시작 시간 기록
-            job_start_time = asyncio.get_event_loop().time()
+            # 'No jobs available' 메시지 확인
+            if isinstance(job, dict) and "message" in job and job.get("message") == "No jobs available":
+                # 조용히 5초 대기 (로그 스팸 방지)
+                await asyncio.sleep(5)
+                continue
+
+            # 유효한 작업인지 확인
+            if not isinstance(job, dict) or "id" not in job:
+                logger.warning(f"유효하지 않은 작업 형식: {job}")
+                await asyncio.sleep(5)
+                continue
+
+            # 작업 ID 및 데이터 추출
             job_id = job["id"]
-
+            job_data = job["data"]
+            
+            # JobLog 인스턴스 생성
+            job_log = JobLog(job_id, job_data)
+            job_logs[job_id] = job_log
+            
             # 작업 상태 초기화
             active_jobs[job_id] = JobStatus(
                 job_id=job_id,
@@ -122,19 +235,22 @@ async def process_audio_job():
                 start_time=datetime.now()
             )
 
-            # 작업 데이터 추출
-            job_data = job["data"]
             file_path = job_data["filePath"]
             channel_id = job_data["channelId"]
             live_id = job_data["liveId"]
             start_time = job_data["startTime"]
             end_time = job_data["endTime"]
-            logger.info(f"작업 데이터: filePath={file_path}, channelId={channel_id}, liveId={live_id}")
+            
+            job_log.add_log("job_started", {
+                "file_path": file_path,
+                "channel_id": channel_id,
+                "live_id": live_id
+            })
 
             try:
-                # Whisper 변환 시작 시간 기록
-                whisper_start_time = asyncio.get_event_loop().time()
-                logger.info(f"Fast-Whisper 변환 시작: {file_path}")
+                # Whisper 변환 시작
+                job_log.start_timer("transcription")
+                job_log.add_log("transcription_started")
                 
                 # Fast-Whisper로 오디오 변환 (비동기로 실행)
                 loop = asyncio.get_event_loop()
@@ -143,12 +259,16 @@ async def process_audio_job():
                     lambda: whisper_client.transcribe_from_minio(file_path)
                 )
                 
-                # Whisper 변환 종료 시간 기록
-                whisper_end_time = asyncio.get_event_loop().time()
-                whisper_duration = whisper_end_time - whisper_start_time
-                logger.info(f"Fast-Whisper 변환 완료: {round(whisper_duration, 2)}초 소요")
+                # 변환 완료 시간 기록
+                transcription_duration = job_log.end_timer("transcription")
+                job_log.add_log("transcription_completed", {
+                    "duration": transcription_duration,
+                    "text_length": len(text)
+                })
                 
                 # 작업 완료 처리
+                job_log.start_timer("post_processing")
+                
                 result = {
                     "status": "success",
                     "text": text,
@@ -157,12 +277,13 @@ async def process_audio_job():
                         "liveId": live_id,
                         "startTime": start_time,
                         "endTime": end_time,
-                        "processingTime": f"{round(asyncio.get_event_loop().time() - job_start_time, 2)}초",
-                        "transcriptionTime": f"{round(whisper_duration, 2)}초"
+                        "transcriptionTime": f"{transcription_duration}초"
                     }
                 }
-                logger.info(f"작업 완료 처리: job_id={job_id}")
+                
+                # Nest 서버에 완료 알림
                 nest_client.complete_job("audio-processing", job_id, result)
+                job_log.add_log("job_completed_notify")
 
                 # whisper-processing 큐에 결과 추가
                 whisper_job_data = {
@@ -172,12 +293,13 @@ async def process_audio_job():
                     "startTime": start_time,
                     "endTime": end_time,
                     "text": text,
-                    "processingTime": f"{round(asyncio.get_event_loop().time() - job_start_time, 2)}초",
-                    "transcriptionTime": f"{round(whisper_duration, 2)}초"
+                    "transcriptionTime": f"{transcription_duration}초"
                 }
-                logger.info("whisper-processing 큐에 결과 추가")
                 nest_client.add_job("whisper-processing", whisper_job_data)
-                logger.info("=== 작업 처리 완료 ===\n")
+                job_log.add_log("result_queued")
+                
+                job_log.end_timer("post_processing")
+                job_log.set_result(result)
 
                 # 작업 상태 업데이트
                 active_jobs[job_id].status = "completed"
@@ -186,29 +308,32 @@ async def process_audio_job():
             except Exception as e:
                 # 작업 실패 처리
                 error_msg = str(e)
-                logger.error(f"작업 처리 중 에러 발생: {error_msg}")
+                job_log.set_error(error_msg)
+                job_log.add_log("job_failed", {"error": error_msg})
+                
                 nest_client.fail_job("audio-processing", job_id, error_msg)
                 
                 # 작업 상태 업데이트
                 active_jobs[job_id].status = "failed"
                 active_jobs[job_id].error = error_msg
 
+            finally:
+                # 최종 로그 출력 및 정리
+                job_log.print_final_log()
+                
+                # 메모리 정리 (완료된 작업 로그 제거)
+                if job_id in job_logs:
+                    del job_logs[job_id]
+
         except HTTPException as e:
             if e.status_code == 404:
-                # 작업이 없는 경우 잠시 대기
-                logger.info("처리할 작업이 없습니다. 5초 후 재시도...")
+                # 작업이 없는 경우 조용히 대기
                 await asyncio.sleep(5)
                 continue
             logger.error(f"HTTP 에러 발생: {str(e)}")
             await asyncio.sleep(5)
         except Exception as e:
-            error_msg = str(e)
-            if "No jobs available" in error_msg:
-                # 작업이 없는 경우는 예상된 상황이므로 INFO 레벨로 로깅
-                logger.info("처리할 작업이 없습니다. 5초 후 재시도...")
-                await asyncio.sleep(5)
-                continue
-            logger.error(f"예상치 못한 에러 발생: {error_msg}")
+            logger.error(f"예상치 못한 에러 발생: {str(e)}")
             await asyncio.sleep(5)
 
 @app.on_event("startup")
