@@ -1,10 +1,21 @@
-# pip install asyncpg databases 필요
+# pip install asyncpg databases faster-whisper 필요
 from fastapi import FastAPI, UploadFile, File, Query, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, List
-from libs.whisper_client import whisper as whisper_client
-from libs.vision_client import vision as vision_client
+from libs.fast_whisper_client import fast_whisper as whisper_client
+
+# Vision client는 선택적 import (호환성 문제 방지)
+try:
+    from libs.vision_client import vision as vision_client
+    VISION_AVAILABLE = True
+    print("✅ Vision client 로드 성공")
+except Exception as e:
+    print(f"⚠️  Vision client 로드 실패: {e}")
+    print("🎵 Audio processing만 사용 가능합니다.")
+    vision_client = None
+    VISION_AVAILABLE = False
+
 from apps.hub_server.nest_client import nest_client
 import shutil      
 import os
@@ -123,9 +134,9 @@ async def process_audio_job():
             try:
                 # Whisper 변환 시작 시간 기록
                 whisper_start_time = asyncio.get_event_loop().time()
-                logger.info(f"Whisper 변환 시작: {file_path}")
+                logger.info(f"Fast-Whisper 변환 시작: {file_path}")
                 
-                # Whisper로 오디오 변환 (비동기로 실행)
+                # Fast-Whisper로 오디오 변환 (비동기로 실행)
                 loop = asyncio.get_event_loop()
                 text = await loop.run_in_executor(
                     None,  # 기본 스레드 풀 사용
@@ -135,7 +146,7 @@ async def process_audio_job():
                 # Whisper 변환 종료 시간 기록
                 whisper_end_time = asyncio.get_event_loop().time()
                 whisper_duration = whisper_end_time - whisper_start_time
-                logger.info(f"Whisper 변환 완료: {round(whisper_duration, 2)}초 소요")
+                logger.info(f"Fast-Whisper 변환 완료: {round(whisper_duration, 2)}초 소요")
                 
                 # 작업 완료 처리
                 result = {
