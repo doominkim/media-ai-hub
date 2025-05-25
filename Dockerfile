@@ -9,9 +9,25 @@ ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 
 # 시스템 패키지 업데이트 및 오디오 처리 라이브러리 설치
 RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
     ffmpeg \
     libsndfile1-dev \
     libsox-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# NVIDIA GPG key를 더 안정적인 방법으로 추가
+RUN wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/3bf863cc.pub | apt-key add - || \
+    apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/3bf863cc.pub || \
+    echo "GPG key 추가 실패, 계속 진행"
+
+# NVIDIA 레포지토리 추가 (시도만 하고 실패해도 계속 진행)
+RUN echo "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64 /" > /etc/apt/sources.list.d/cuda.list || echo "CUDA repo 추가 실패"
+
+# cuDNN 8.x 설치 시도 (실패해도 계속 진행)
+RUN apt-get update && (apt-get install -y \
+    libcudnn8 \
+    libcudnn8-dev || echo "cuDNN 패키지 설치 실패, 기본 cuDNN 사용") \
     && rm -rf /var/lib/apt/lists/*
 
 # 작업 디렉토리 설정

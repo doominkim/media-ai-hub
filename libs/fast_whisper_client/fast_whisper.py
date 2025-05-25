@@ -53,8 +53,6 @@ def initialize_whisper_model():
                 device=device, 
                 compute_type=compute_type,
                 # CTranslate2 설정 추가
-                inter_threads=1,  # 스레드 수 제한
-                intra_threads=1   # 내부 스레드 수 제한
             )
             print(f"✅ Fast-Whisper 모델 로드 성공: {WHISPER_MODEL} on {device}")
         except Exception as model_error:

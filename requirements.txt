@@ -52,3 +52,4 @@ typing_extensions==4.13.2
 urllib3==2.4.0
 boto3
 silero-vad==5.1.2
+ctranslate2==4.4.0
