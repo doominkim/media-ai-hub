@@ -322,20 +322,9 @@ def transcribe_from_minio(
             # 음성 구간 추출
             voice_segments = extract_voice_segments(tmp_path)
             
-            if not voice_segments:  # 음성 구간이 없는 경우 fallback 처리
-                print("⚠️ VAD로 음성 구간을 찾지 못함, 전체 오디오를 직접 transcribe 시도")
-                try:
-                    # 전체 오디오 파일을 직접 transcribe
-                    full_text = transcribe(tmp_path)
-                    if full_text and full_text.strip():
-                        print(f"✅ 전체 오디오 transcribe 성공: '{full_text[:50]}...'")
-                        return full_text.strip()
-                    else:
-                        print("❌ 전체 오디오에서도 텍스트를 추출하지 못함")
-                        raise ValueError("No text extracted from full audio file")
-                except Exception as full_transcribe_error:
-                    print(f"💥 전체 오디오 transcribe 실패: {full_transcribe_error}")
-                    raise ValueError("No voice segments detected and full transcribe failed")
+            if not voice_segments:  # 음성 구간이 없는 경우 바로 실패 처리
+                print("❌ VAD 결과: 음성 구간이 감지되지 않았습니다")
+                raise ValueError("No voice segments detected in audio - VAD analysis complete")
             
             # 병렬 처리로 각 구간 처리
             texts = []
@@ -359,21 +348,12 @@ def transcribe_from_minio(
                         print(error_msg)
             
             if not texts:  # 모든 구간에서 텍스트 추출 실패
-                print("❌ 모든 음성 구간에서 텍스트 추출 실패, 전체 오디오 fallback 시도")
-                try:
-                    # 마지막 수단으로 전체 오디오 transcribe
-                    full_text = transcribe(tmp_path)
-                    if full_text and full_text.strip():
-                        print(f"✅ Fallback transcribe 성공: '{full_text[:50]}...'")
-                        return full_text.strip()
-                    else:
-                        raise ValueError("Failed to extract text from any audio segment and full transcribe")
-                except Exception as fallback_error:
-                    print(f"💥 Fallback transcribe도 실패: {fallback_error}")
-                    raise ValueError("Failed to extract text from any audio segment and full transcribe")
+                print("❌ 모든 음성 구간에서 텍스트 추출 실패")
+                raise ValueError("Failed to extract text from any audio segment")
             
             return " ".join(texts)
             
         finally:
             # 원본 임시 파일 삭제
-            os.unlink(tmp_path) 
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path) 
